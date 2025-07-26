@@ -1,0 +1,63 @@
+{
+  "name": "ai-node-builder",
+  "displayName": "AI Node Builder",
+  "description": "A VS Code extension for visually building AI applications using drag-and-drop nodes powered by LangChain and LangGraph.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.102.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ai-node-builder.helloWorld",
+        "title": "Hello World"
+      },
+      {
+        "command": "ai-node-builder.openNodeEditor",
+        "title": "Open AI Node Editor"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aiNodeBuilderViewContainer",
+          "title": "AI Node Builder",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "aiNodeBuilderViewContainer": [
+        {
+          "id": "aiNodeBuilderView",
+          "name": "Node Editor",
+          "type": "webview"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.102.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@typescript-eslint/eslint-plugin": "^8.31.1",
+    "@typescript-eslint/parser": "^8.31.1",
+    "eslint": "^9.25.1",
+    "typescript": "^5.8.3",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}

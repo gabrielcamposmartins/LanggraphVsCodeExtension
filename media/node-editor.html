@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Node Builder</title>
+  <style>
+    html, body { height: 100%; margin: 0; padding: 0; }
+    body { background: #181818; color: #fff; height: 100vh; margin: 0; }
+    #container {
+      display: flex;
+      height: 100vh;
+      width: 100vw;
+    }
+    #palette {
+      width: 120px;
+      background: #23272e;
+      border-right: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 24px;
+      z-index: 200;
+    }
+    .palette-node {
+      width: 80px;
+      height: 40px;
+      background: #4F8EF7;
+      color: #fff;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+      cursor: grab;
+      font-size: 1rem;
+      user-select: none;
+      border: 2px solid #fff2;
+    }
+    #editor {
+      flex: 1;
+      height: 100vh;
+      position: relative;
+      overflow: hidden;
+    }
+    .node {
+      position: absolute;
+      min-width: 120px;
+      min-height: 40px;
+      background: #23272e;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px #0008;
+      padding: 12px;
+      cursor: grab;
+      user-select: none;
+      color: #fff;
+      border: 2px solid #4F8EF7;
+      font-size: 1rem;
+      z-index: 2;
+    }
+    .node.dragging {
+      opacity: 0.7;
+      z-index: 10;
+    }
+    #add-node-btn {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      z-index: 100;
+      background: #4F8EF7;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 1rem;
+      cursor: pointer;
+      box-shadow: 0 2px 8px #0004;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="palette">
+      <div class="palette-node" draggable="true" id="sample-palette-node">Sample Node</div>
+    </div>
+    <div id="editor">
+      <button id="add-node-btn">Add Node</button>
+    </div>
+  </div>
+  <script>
+    const vscode = acquireVsCodeApi();
+    const editor = document.getElementById('editor');
+    const addNodeBtn = document.getElementById('add-node-btn');
+    let nodeId = 0;
+    let draggingNode = null;
+    let offsetX = 0, offsetY = 0;
+
+    function createNode(x, y, label = null) {
+      const node = document.createElement('div');
+      node.className = 'node';
+      node.textContent = label || ('Node ' + (++nodeId));
+      node.style.left = x + 'px';
+      node.style.top = y + 'px';
+      node.draggable = false;
+      node.addEventListener('mousedown', (e) => {
+        draggingNode = node;
+        offsetX = e.offsetX;
+        offsetY = e.offsetY;
+        node.classList.add('dragging');
+      });
+      editor.appendChild(node);
+    }
+    // Drag from palette
+    const paletteNode = document.getElementById('sample-palette-node');
+    let paletteDrag = false;
+    let dragGhost = null;
+
+    paletteNode.addEventListener('dragstart', (e) => {
+      paletteDrag = true;
+      dragGhost = paletteNode.cloneNode(true);
+      dragGhost.style.position = 'absolute';
+      dragGhost.style.pointerEvents = 'none';
+      dragGhost.style.opacity = '0.7';
+      dragGhost.style.zIndex = '9999';
+      document.body.appendChild(dragGhost);
+      e.dataTransfer.setDragImage(dragGhost, 40, 20);
+    });
+    paletteNode.addEventListener('dragend', () => {
+      paletteDrag = false;
+      if (dragGhost) {
+        document.body.removeChild(dragGhost);
+        dragGhost = null;
+      }
+    });
+
+    editor.addEventListener('dragover', (e) => {
+      if (paletteDrag) {
+        e.preventDefault();
+      }
+    });
+    editor.addEventListener('drop', (e) => {
+      if (paletteDrag) {
+        e.preventDefault();
+        const rect = editor.getBoundingClientRect();
+        createNode(e.clientX - rect.left, e.clientY - rect.top, 'Sample Node');
+      }
+    });
+
+    addNodeBtn.addEventListener('click', () => {
+      createNode(100 + Math.random() * 300, 100 + Math.random() * 200);
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (draggingNode) {
+        draggingNode.style.left = (e.clientX - offsetX) + 'px';
+        draggingNode.style.top = (e.clientY - offsetY) + 'px';
+      }
+    });
+    document.addEventListener('mouseup', () => {
+      if (draggingNode) {
+        draggingNode.classList.remove('dragging');
+        draggingNode = null;
+      }
+    });
+  </script>
+</body>
+</html>
