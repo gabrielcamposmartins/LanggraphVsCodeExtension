@@ -443,6 +443,7 @@ const nodeBuilderViewDisposable = vscode.window.registerWebviewViewProvider('aiN
 				   LoadUserNodes = 'loadUserNodes',
 				   SaveUserNodesPath = 'saveUserNodesPath',
 				   GetUserNodesPath = 'getUserNodesPath',
+				   SaveTemplate = 'saveTemplate',
 			   }
 
 
@@ -625,6 +626,64 @@ const nodeBuilderViewDisposable = vscode.window.registerWebviewViewProvider('aiN
 				   webviewView.webview.postMessage({ command: 'userNodesPathLoaded', path });
 			   }
 
+			   async function handleSaveTemplate(message: any) {
+				   // Get the path from message or from stored path
+				   let targetPath = message.path;
+				   if (!targetPath) {
+					   targetPath = context.globalState.get('userNodesPath', '');
+				   }
+				   
+				   if (!targetPath) {
+					   vscode.window.showErrorMessage('Please set a valid path for user nodes first.');
+					   return;
+				   }
+
+				   // Get template name from user
+				   const templateName = await vscode.window.showInputBox({
+					   prompt: 'Enter a name for the template',
+					   placeHolder: 'my_custom_node'
+				   });
+
+				   if (!templateName) {
+					   return; // User cancelled
+				   }
+
+				   // Sanitize template name
+				   const sanitizedName = templateName.replace(/[^a-zA-Z0-9_]/g, '_');
+				   if (!/^[_a-zA-Z][_a-zA-Z0-9]*$/.test(sanitizedName)) {
+					   vscode.window.showErrorMessage('Template name must be a valid Python identifier.');
+					   return;
+				   }
+
+				   // Get template content from user
+				   const templateContent = await vscode.window.showInputBox({
+					   prompt: 'Enter the template code (or leave empty for basic template)',
+					   value: `def ${sanitizedName}(state):\n    # TODO: implement your custom logic here\n    return state`
+				   });
+
+				   if (templateContent === undefined) {
+					   return; // User cancelled
+				   }
+
+				   try {
+					   // Ensure target directory exists
+					   const targetUri = vscode.Uri.file(targetPath);
+					   await vscode.workspace.fs.createDirectory(targetUri);
+
+					   // Create the template file
+					   const templateFile = vscode.Uri.joinPath(targetUri, `${sanitizedName}.py`);
+					   const finalContent = templateContent || `def ${sanitizedName}(state):\n    # TODO: implement your custom logic here\n    return state`;
+					   await vscode.workspace.fs.writeFile(templateFile, Buffer.from(finalContent, 'utf8'));
+
+					   vscode.window.showInformationMessage(`Template '${sanitizedName}' saved successfully!`);
+					   
+					   // Reload user nodes to show the new template
+					   await handleLoadUserNodes({ path: targetPath });
+				   } catch (e) {
+					   vscode.window.showErrorMessage('Failed to save template: ' + (typeof e === 'object' && e && 'message' in e ? (e as any).message : String(e)));
+				   }
+			   }
+
 			   webviewView.webview.onDidReceiveMessage(async message => {
 				   switch (message.command) {
 					   case SidebarCommand.CreateNewProject:
@@ -647,6 +706,9 @@ const nodeBuilderViewDisposable = vscode.window.registerWebviewViewProvider('aiN
 						   break;
 					   case SidebarCommand.GetUserNodesPath:
 						   await handleGetUserNodesPath();
+						   break;
+					   case SidebarCommand.SaveTemplate:
+						   await handleSaveTemplate(message);
 						   break;
 					   case 'checkProjectExists': {
 						   // Check if main.py and /nodes exist
