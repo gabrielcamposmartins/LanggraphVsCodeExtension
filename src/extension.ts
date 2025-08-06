@@ -253,7 +253,12 @@ const openNodeEditor = async () => {
 				break;
 			case 'sidebarPaletteNodeClick':
 				// Sidebar node clicked: set pending node type in editor
-				panel.webview.postMessage({ command: 'setPendingNodeType', label: message.label });
+				if (message.isUserNode) {
+					// Handle user node click - could load template content
+					panel.webview.postMessage({ command: 'setPendingNodeType', label: message.label, isUserNode: true });
+				} else {
+					panel.webview.postMessage({ command: 'setPendingNodeType', label: message.label });
+				}
 				break;
 			case 'editorClickToAddNode':
 				// Editor clicked: create node at position
@@ -420,11 +425,24 @@ const nodeBuilderViewDisposable = vscode.window.registerWebviewViewProvider('aiN
 			   };
 			   webviewView.webview.html = getSidebarHtml();
 
+			   // Initialize user nodes path on webview creation
+			   setTimeout(async () => {
+				   await handleGetUserNodesPath();
+				   // Auto-load user nodes if path is already set
+				   const savedPath = context.globalState.get('userNodesPath', '');
+				   if (savedPath) {
+					   await handleLoadUserNodes({ path: savedPath });
+				   }
+			   }, 500);
+
 			   enum SidebarCommand {
 				   CreateNewProject = 'createNewProject',
 				   AddNode = 'addNode',
 				   GetStateInfo = 'getStateInfo',
 				   UpdateStateInfo = 'updateStateInfo',
+				   LoadUserNodes = 'loadUserNodes',
+				   SaveUserNodesPath = 'saveUserNodesPath',
+				   GetUserNodesPath = 'getUserNodesPath',
 			   }
 
 
@@ -557,6 +575,56 @@ const nodeBuilderViewDisposable = vscode.window.registerWebviewViewProvider('aiN
 				   }
 			   }
 
+			   async function handleLoadUserNodes(message: any) {
+				   const userNodesPath = message.path;
+				   if (!userNodesPath) return;
+				   
+				   try {
+					   const userNodesUri = vscode.Uri.file(userNodesPath);
+					   const stat = await vscode.workspace.fs.stat(userNodesUri);
+					   
+					   if (stat.type === vscode.FileType.Directory) {
+						   const files = await vscode.workspace.fs.readDirectory(userNodesUri);
+						   const nodeFiles = files.filter(([name, type]) => name.endsWith('.py') && type === vscode.FileType.File);
+						   
+						   const nodes = [];
+						   for (const [filename] of nodeFiles) {
+							   const nodeName = filename.replace('.py', '');
+							   const nodeUri = vscode.Uri.joinPath(userNodesUri, filename);
+							   try {
+								   const content = await vscode.workspace.fs.readFile(nodeUri);
+								   const contentStr = Buffer.from(content).toString('utf8');
+								   nodes.push({
+									   name: nodeName,
+									   content: contentStr,
+									   path: nodeUri.fsPath
+								   });
+							   } catch (e) {
+								   // Skip files that can't be read
+							   }
+						   }
+						   
+						   webviewView.webview.postMessage({ command: 'userNodesLoaded', nodes });
+					   } else {
+						   vscode.window.showErrorMessage('Path must be a directory');
+					   }
+				   } catch (e) {
+					   vscode.window.showErrorMessage('Failed to load user nodes: ' + (typeof e === 'object' && e && 'message' in e ? (e as any).message : String(e)));
+				   }
+			   }
+
+			   async function handleSaveUserNodesPath(message: any) {
+				   const path = message.path;
+				   if (path) {
+					   await context.globalState.update('userNodesPath', path);
+				   }
+			   }
+
+			   async function handleGetUserNodesPath() {
+				   const path = context.globalState.get('userNodesPath', '');
+				   webviewView.webview.postMessage({ command: 'userNodesPathLoaded', path });
+			   }
+
 			   webviewView.webview.onDidReceiveMessage(async message => {
 				   switch (message.command) {
 					   case SidebarCommand.CreateNewProject:
@@ -570,6 +638,15 @@ const nodeBuilderViewDisposable = vscode.window.registerWebviewViewProvider('aiN
 						   break;
 					   case SidebarCommand.UpdateStateInfo:
 						   await handleUpdateStateInfo(message);
+						   break;
+					   case SidebarCommand.LoadUserNodes:
+						   await handleLoadUserNodes(message);
+						   break;
+					   case SidebarCommand.SaveUserNodesPath:
+						   await handleSaveUserNodesPath(message);
+						   break;
+					   case SidebarCommand.GetUserNodesPath:
+						   await handleGetUserNodesPath();
 						   break;
 					   case 'checkProjectExists': {
 						   // Check if main.py and /nodes exist
@@ -590,7 +667,9 @@ const nodeBuilderViewDisposable = vscode.window.registerWebviewViewProvider('aiN
 					   }
 						case 'sidebarPaletteNodeClick':
 							// Sidebar node clicked: set pending node type in editor
-							panel.webview.postMessage({ command: 'setPendingNodeType', label: message.label });
+							if (panel && panel.webview) {
+								panel.webview.postMessage({ command: 'setPendingNodeType', label: message.label });
+							}
 						break;
 					   default:
 						   // Unknown command
