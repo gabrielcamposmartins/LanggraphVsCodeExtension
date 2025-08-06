@@ -32,9 +32,18 @@
       </div>
     </div>
     <div class="sidebar-section">
-      <div class="sidebar-section-header" style="cursor:pointer;padding:10px 16px;background:#23272e;border-bottom:1px solid #333;font-weight:bold;">Sample Section ▼</div>
+      <div class="sidebar-section-header" style="cursor:pointer;padding:10px 16px;background:#23272e;border-bottom:1px solid #333;font-weight:bold;">My nodes ▼</div>
       <div class="sidebar-section-content" style="padding:10px 0 0 0;">
-        <div style="color:#aaa;padding:8px 16px;">This is a sample section. Add your content here.</div>
+        <div style="padding:8px 16px;">
+          <div style="margin-bottom:12px;">
+            <label style="display:block;color:#aaa;font-size:0.9rem;margin-bottom:4px;">Node templates path:</label>
+            <input id="user-nodes-path" type="text" placeholder="/path/to/your/nodes" style="width:100%;background:#2d2d30;color:#fff;border:1px solid #464647;border-radius:4px;padding:6px 8px;font-size:0.9rem;">
+            <button id="load-user-nodes-btn" style="margin-top:8px;background:#4F8EF7;color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:0.85rem;cursor:pointer;">Load Nodes</button>
+          </div>
+          <div id="user-nodes-container" style="margin-top:16px;">
+            <div style="color:#aaa;font-size:0.9rem;">No user nodes loaded</div>
+          </div>
+        </div>
       </div>
     </div>
     <button id="new-project-btn" class="sidebar-btn">Create New Project</button>
@@ -43,17 +52,68 @@
   <script>
     const vscode = acquireVsCodeApi();
     const newProjectBtn = document.getElementById("new-project-btn");
+    
     // Check if project exists (main.py and /nodes)
     window.addEventListener('message', event => {
       const message = event.data;
       if (message.command === 'projectDetected') {
         newProjectBtn.textContent = 'Load Workspace Project';
       }
+      if (message.command === 'userNodesLoaded') {
+        displayUserNodes(message.nodes);
+      }
+      if (message.command === 'userNodesPathLoaded') {
+        const pathInput = document.getElementById('user-nodes-path');
+        if (pathInput && message.path) {
+          pathInput.value = message.path;
+        }
+      }
     });
+    
+    // Load user nodes path on startup
+    vscode.postMessage({ command: 'getUserNodesPath' });
     vscode.postMessage({ command: 'checkProjectExists' });
+    
     newProjectBtn.addEventListener("click", () => {
       vscode.postMessage({ command: "createNewProject" });
     });
+    
+    // Handle user nodes path loading
+    const loadUserNodesBtn = document.getElementById('load-user-nodes-btn');
+    if (loadUserNodesBtn) {
+      loadUserNodesBtn.addEventListener('click', () => {
+        const pathInput = document.getElementById('user-nodes-path');
+        const path = pathInput.value.trim();
+        if (path) {
+          vscode.postMessage({ command: 'loadUserNodes', path: path });
+          vscode.postMessage({ command: 'saveUserNodesPath', path: path });
+        }
+      });
+    }
+    
+    function displayUserNodes(nodes) {
+      const container = document.getElementById('user-nodes-container');
+      if (!container) return;
+      
+      if (!nodes || nodes.length === 0) {
+        container.innerHTML = '<div style="color:#aaa;font-size:0.9rem;">No user nodes found</div>';
+        return;
+      }
+      
+      let html = '';
+      nodes.forEach(node => {
+        html += `<div class="user-node" data-node-name="${node.name}" style="width:80px;height:40px;background:#28a745;color:#fff;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;font-size:0.85rem;user-select:none;border:2px solid #fff2;cursor:pointer;">${node.name}</div>`;
+      });
+      container.innerHTML = html;
+      
+      // Add click handlers for user nodes
+      container.querySelectorAll('.user-node').forEach(nodeEl => {
+        nodeEl.addEventListener('click', () => {
+          const nodeName = nodeEl.getAttribute('data-node-name');
+          vscode.postMessage({ command: 'sidebarPaletteNodeClick', label: nodeName, isUserNode: true });
+        });
+      });
+    }
     vscode.postMessage({ command: "getStateInfo" });
     window.addEventListener("message", event => {
       const message = event.data;
