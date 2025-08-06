@@ -440,6 +440,7 @@ const nodeBuilderViewDisposable = vscode.window.registerWebviewViewProvider('aiN
 				   AddNode = 'addNode',
 				   GetStateInfo = 'getStateInfo',
 				   UpdateStateInfo = 'updateStateInfo',
+				   // User Nodes Management Commands
 				   LoadUserNodes = 'loadUserNodes',
 				   SaveUserNodesPath = 'saveUserNodesPath',
 				   GetUserNodesPath = 'getUserNodesPath',

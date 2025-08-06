@@ -70,8 +70,24 @@ This extension provides a visual drag-and-drop node editor for building AI appli
 ## Features
 - Drag-and-drop node editor in a webview
 - Visual workflow creation for LangChain and LangGraph
+- **My nodes** section for managing custom user node templates
 - Communication between extension backend and webview
 - Extensible for custom AI components
+
+## My Nodes Feature
+The extension now includes a **"My nodes"** section in the sidebar that allows users to:
+
+- **Set a custom path** for storing personal node templates
+- **Load existing nodes** from the specified directory
+- **Save new templates** directly from the extension
+- **Auto-load** user nodes on extension startup
+
+### Using My Nodes
+1. Open the sidebar and expand the "My nodes" section
+2. Enter the path to your node templates directory (e.g., `/path/to/your/nodes`)
+3. Click "Load Nodes" to scan and display available templates
+4. Click "Save Template" to create new reusable node templates
+5. User nodes will appear as green clickable blocks in the "My nodes" section
 
 ## Getting Started
 1. Open the command palette and run `AI Node Builder: Start` to open the node editor.
