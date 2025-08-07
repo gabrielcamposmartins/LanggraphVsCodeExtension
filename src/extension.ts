@@ -162,7 +162,16 @@ const openNodeEditor = async () => {
 			nodeName = nodeName.replace(/[^a-zA-Z0-9_]/g, '_');
 			if (!/^[_a-zA-Z][_a-zA-Z0-9]*$/.test(nodeName)) nodeName = 'node';
 			const pyFile = vscode.Uri.joinPath(nodesDir, `${nodeName}.py`);
-			const pyContent = `# LangGraph Node: ${nodeName}\n\ndef ${nodeName}(state):\n    # TODO: implement node logic\n    return state\n`;
+			
+			let pyContent = '';
+			if (message.isUserNode && message.userNodeContent) {
+				// Use actual content from user's node file
+				pyContent = message.userNodeContent;
+			} else {
+				// Create default template for non-user nodes
+				pyContent = `# LangGraph Node: ${nodeName}\n\ndef ${nodeName}(state):\n    # TODO: implement node logic\n    return state\n`;
+			}
+			
 			await vscode.workspace.fs.writeFile(pyFile, Buffer.from(pyContent, 'utf8'));
 			// Insert import and node registration in main.py
 			let mainPyText = Buffer.from(await vscode.workspace.fs.readFile(mainPy)).toString('utf8');
@@ -254,8 +263,40 @@ const openNodeEditor = async () => {
 			case 'sidebarPaletteNodeClick':
 				// Sidebar node clicked: set pending node type in editor
 				if (message.isUserNode) {
-					// Handle user node click - could load template content
-					panel.webview.postMessage({ command: 'setPendingNodeType', label: message.label, isUserNode: true });
+					// Handle user node click - load actual content from the user's file
+					const wsFolders = vscode.workspace.workspaceFolders;
+					if (wsFolders && wsFolders.length > 0) {
+						const rootUri = wsFolders[0].uri;
+						const nodeEditorPath = vscode.Uri.joinPath(rootUri, 'node-editor.json');
+						try {
+							const data = await vscode.workspace.fs.readFile(nodeEditorPath);
+							const nodeEditorData = JSON.parse(Buffer.from(data).toString('utf8'));
+							const userNodesPath = nodeEditorData.userNodesPath;
+							if (userNodesPath) {
+								const userNodesUri = vscode.Uri.file(userNodesPath);
+								const userNodeFile = vscode.Uri.joinPath(userNodesUri, `${message.label}.py`);
+								try {
+									const content = await vscode.workspace.fs.readFile(userNodeFile);
+									const contentStr = Buffer.from(content).toString('utf8');
+									panel.webview.postMessage({ 
+										command: 'setPendingNodeType', 
+										label: message.label, 
+										isUserNode: true,
+										userNodeContent: contentStr
+									});
+								} catch (e) {
+									vscode.window.showErrorMessage(`Failed to read user node file: ${userNodeFile.fsPath}`);
+									panel.webview.postMessage({ command: 'setPendingNodeType', label: message.label, isUserNode: true });
+								}
+							} else {
+								panel.webview.postMessage({ command: 'setPendingNodeType', label: message.label, isUserNode: true });
+							}
+						} catch (e) {
+							panel.webview.postMessage({ command: 'setPendingNodeType', label: message.label, isUserNode: true });
+						}
+					} else {
+						panel.webview.postMessage({ command: 'setPendingNodeType', label: message.label, isUserNode: true });
+					}
 				} else {
 					panel.webview.postMessage({ command: 'setPendingNodeType', label: message.label });
 				}
@@ -263,7 +304,18 @@ const openNodeEditor = async () => {
 			case 'editorClickToAddNode':
 				// Editor clicked: create node at position
 				if (message.label) {
-					panel.webview.postMessage({ command: 'createNodeFromSidebar', x: message.x, y: message.y, label: message.label });
+					// Forward the user node content if it exists
+					const postMessage: any = { 
+						command: 'createNodeFromSidebar', 
+						x: message.x, 
+						y: message.y, 
+						label: message.label 
+					};
+					if (message.isUserNode && message.userNodeContent) {
+						postMessage.isUserNode = true;
+						postMessage.userNodeContent = message.userNodeContent;
+					}
+					panel.webview.postMessage(postMessage);
 				}
 				break;
 			case 'deleteNode': {
@@ -429,9 +481,20 @@ const nodeBuilderViewDisposable = vscode.window.registerWebviewViewProvider('aiN
 			   setTimeout(async () => {
 				   await handleGetUserNodesPath();
 				   // Auto-load user nodes if path is already set
-				   const savedPath = context.globalState.get('userNodesPath', '');
-				   if (savedPath) {
-					   await handleLoadUserNodes({ path: savedPath });
+				   const wsFolders = vscode.workspace.workspaceFolders;
+				   if (wsFolders && wsFolders.length > 0) {
+					   const rootUri = wsFolders[0].uri;
+					   const nodeEditorPath = vscode.Uri.joinPath(rootUri, 'node-editor.json');
+					   try {
+						   const data = await vscode.workspace.fs.readFile(nodeEditorPath);
+						   const nodeEditorData = JSON.parse(Buffer.from(data).toString('utf8'));
+						   const savedPath = nodeEditorData.userNodesPath || '';
+						   if (savedPath) {
+							   await handleLoadUserNodes({ path: savedPath });
+						   }
+					   } catch (e) {
+						   // File doesn't exist or doesn't have userNodesPath, no auto-load
+					   }
 				   }
 			   }, 500);
 
@@ -616,12 +679,43 @@ const nodeBuilderViewDisposable = vscode.window.registerWebviewViewProvider('aiN
 			   async function handleSaveUserNodesPath(message: any) {
 				   const path = message.path;
 				   if (path) {
-					   await context.globalState.update('userNodesPath', path);
+					   // Save to node-editor.json instead of global state
+					   const wsFolders = vscode.workspace.workspaceFolders;
+					   if (wsFolders && wsFolders.length > 0) {
+						   const rootUri = wsFolders[0].uri;
+						   const nodeEditorPath = vscode.Uri.joinPath(rootUri, 'node-editor.json');
+						   try {
+							   let nodeEditorData: any = {};
+							   try {
+								   const existingData = await vscode.workspace.fs.readFile(nodeEditorPath);
+								   nodeEditorData = JSON.parse(Buffer.from(existingData).toString('utf8'));
+							   } catch (e) {
+								   // File doesn't exist yet, start with empty object
+							   }
+							   nodeEditorData.userNodesPath = path;
+							   await vscode.workspace.fs.writeFile(nodeEditorPath, Buffer.from(JSON.stringify(nodeEditorData, null, 2), 'utf8'));
+						   } catch (e) {
+							   vscode.window.showErrorMessage('Failed to save user nodes path: ' + (typeof e === 'object' && e && 'message' in e ? (e as any).message : String(e)));
+						   }
+					   }
 				   }
 			   }
 
 			   async function handleGetUserNodesPath() {
-				   const path = context.globalState.get('userNodesPath', '');
+				   // Read from node-editor.json instead of global state
+				   const wsFolders = vscode.workspace.workspaceFolders;
+				   let path = '';
+				   if (wsFolders && wsFolders.length > 0) {
+					   const rootUri = wsFolders[0].uri;
+					   const nodeEditorPath = vscode.Uri.joinPath(rootUri, 'node-editor.json');
+					   try {
+						   const data = await vscode.workspace.fs.readFile(nodeEditorPath);
+						   const nodeEditorData = JSON.parse(Buffer.from(data).toString('utf8'));
+						   path = nodeEditorData.userNodesPath || '';
+					   } catch (e) {
+						   // File doesn't exist or doesn't have userNodesPath, use empty string
+					   }
+				   }
 				   webviewView.webview.postMessage({ command: 'userNodesPathLoaded', path });
 			   }
 
