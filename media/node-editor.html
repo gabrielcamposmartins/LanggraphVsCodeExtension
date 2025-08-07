@@ -79,89 +79,452 @@
   </style>
 </head>
 <body>
-  <div id="container">
-    <div id="palette">
-      <div class="palette-node" draggable="true" id="sample-palette-node">Sample Node</div>
+    <div id="container">
+      <div id="editor">
+        <svg id="connections" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;"></svg>
+        <button id="add-node-btn">Add Node</button>
+        <input type="text" name="node-label" id="node-label" placeholder="Enter node label" style="position:absolute;top:16px;left:150px;padding:8px 12px;border-radius:6px;border:1px solid #4F8EF7;background:#23272e;color:#fff;font-size:0.95rem;box-shadow:0 2px 8px #0004;width:200px;">
+        <div id="state-modal" style="display:none;position:absolute;top:40px;left:50%;transform:translateX(-50%);background:#23272e;padding:24px 32px;border-radius:10px;box-shadow:0 4px 24px #000a;z-index:1000;color:#fff;min-width:300px;"></div>
+      </div>
     </div>
-    <div id="editor">
-      <button id="add-node-btn">Add Node</button>
-    </div>
-  </div>
-  <script>
-    const vscode = acquireVsCodeApi();
-    const editor = document.getElementById('editor');
-    const addNodeBtn = document.getElementById('add-node-btn');
-    let nodeId = 0;
-    let draggingNode = null;
-    let offsetX = 0, offsetY = 0;
+    <script>
+      // View State button logic
+      const vscode = acquireVsCodeApi();
+      const viewStateBtn = document.getElementById('view-state-btn');
+      const stateModal = document.getElementById('state-modal');
+      const editor = document.getElementById('editor');
+      const addNodeBtn = document.getElementById('add-node-btn');
+      const nodeLabelInput = document.getElementById('node-label');
 
-    function createNode(x, y, label = null) {
-      const node = document.createElement('div');
-      node.className = 'node';
-      node.textContent = label || ('Node ' + (++nodeId));
-      node.style.left = x + 'px';
-      node.style.top = y + 'px';
-      node.draggable = false;
-      node.addEventListener('mousedown', (e) => {
-        draggingNode = node;
-        offsetX = e.offsetX;
-        offsetY = e.offsetY;
-        node.classList.add('dragging');
+      let nodeId = 0;
+      let draggingNode = null;
+      let offsetX = 0, offsetY = 0;
+
+      // For connections
+      let connecting = false;
+      let connectSource = null;
+      let connectLine = null;
+
+      // Store node data and connections for persistence
+      let nodeEditorData = {
+        nodes: [], // {label, x, y}
+        connections: [] // {from: label, to: label}
+      };
+
+      window.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }, true);
+
+
+      function saveNodeEditorData() {
+        // Save all nodes' label and position
+        nodeEditorData.nodes = Array.from(editor.querySelectorAll('.node')).map(node => ({
+          label: node.textContent,
+          x: parseInt(node.style.left, 10),
+          y: parseInt(node.style.top, 10)
+        }));
+        // connections already up to date
+        vscode.postMessage({ command: 'saveNodeEditorData', nodeEditorData });
+      }
+
+      function redrawConnections() {
+        const svg = document.getElementById('connections');
+        svg.innerHTML = '';
+        nodeEditorData.connections.forEach(conn => {
+          const fromNode = Array.from(editor.querySelectorAll('.node')).find(n => n.textContent === conn.from);
+          const toNode = Array.from(editor.querySelectorAll('.node')).find(n => n.textContent === conn.to);
+          if (fromNode && toNode) {
+            const fromRect = fromNode.getBoundingClientRect();
+            const toRect = toNode.getBoundingClientRect();
+            const editorRect = editor.getBoundingClientRect();
+            const x1 = fromRect.right - editorRect.left;
+            const y1 = fromRect.top + fromRect.height / 2 - editorRect.top;
+            const x2 = toRect.left - editorRect.left;
+            const y2 = toRect.top + toRect.height / 2 - editorRect.top;
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', x1);
+            line.setAttribute('y1', y1);
+            line.setAttribute('x2', x2);
+            line.setAttribute('y2', y2);
+            line.setAttribute('stroke', '#4F8EF7');
+            line.setAttribute('stroke-width', '3');
+            line.setAttribute('marker-end', 'url(#arrowhead)');
+            svg.appendChild(line);
+          }
+        });
+        // Add arrowhead marker
+        if (!svg.querySelector('marker')) {
+          const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+          const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+          marker.setAttribute('id', 'arrowhead');
+          marker.setAttribute('markerWidth', '10');
+          marker.setAttribute('markerHeight', '7');
+          marker.setAttribute('refX', '10');
+          marker.setAttribute('refY', '3.5');
+          marker.setAttribute('orient', 'auto');
+          const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+          arrow.setAttribute('points', '0 0, 10 3.5, 0 7');
+          arrow.setAttribute('fill', '#4F8EF7');
+          marker.appendChild(arrow);
+          defs.appendChild(marker);
+          svg.appendChild(defs);
+        }
+      }
+
+      // viewStateBtn.addEventListener('click', () => {
+      //   vscode.postMessage({ command: 'getStateInfo' });
+      // });
+
+      window.addEventListener('message', event => {
+        const message = event.data;
+        if (message.command === 'showStateInfo') {
+          if (message.stateInfo) {
+            stateModal.innerHTML = `<b>State class variables:</b><br><pre style='color:#4F8EF7'>${message.stateInfo}</pre><button id='close-state-modal' style='margin-top:12px;background:#4F8EF7;color:#fff;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;'>Close</button>`;
+          } else {
+            stateModal.innerHTML = `<b>No State class found in main.py</b><br><button id='close-state-modal' style='margin-top:12px;background:#4F8EF7;color:#fff;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;'>Close</button>`;
+          }
+          stateModal.style.display = 'block';
+          document.getElementById('close-state-modal').onclick = () => {
+            stateModal.style.display = 'none';
+          };
+        } else if (message.command === 'loadNodes' && Array.isArray(message.nodes)) {
+          // Render nodes on the canvas, spaced out
+          let x = 120, y = 100;
+          message.nodes.forEach((label, idx) => {
+            createNode(x + (idx % 4) * 180, y + Math.floor(idx / 4) * 100, label);
+          });
+        } else if (message.command === 'loadNodeEditorState' && message.nodeEditorState) {
+          // Restore nodes and connections from saved state
+          clearNodes();
+          nodeEditorData.connections = [];
+          if (Array.isArray(message.nodeEditorState.nodes)) {
+            message.nodeEditorState.nodes.forEach(n => {
+              createNode(n.x, n.y, n.label, true);
+            });
+          }
+          if (Array.isArray(message.nodeEditorState.connections)) {
+            nodeEditorData.connections = message.nodeEditorState.connections;
+            redrawConnections();
+          }
+        } else if (message.command === 'createNodeFromSidebar') {
+          // Create a node at the given position with the given label
+          createNode(message.x, message.y, message.label);
+        }
       });
-      editor.appendChild(node);
-    }
-    // Drag from palette
-    const paletteNode = document.getElementById('sample-palette-node');
-    let paletteDrag = false;
-    let dragGhost = null;
 
-    paletteNode.addEventListener('dragstart', (e) => {
-      paletteDrag = true;
-      dragGhost = paletteNode.cloneNode(true);
-      dragGhost.style.position = 'absolute';
-      dragGhost.style.pointerEvents = 'none';
-      dragGhost.style.opacity = '0.7';
-      dragGhost.style.zIndex = '9999';
-      document.body.appendChild(dragGhost);
-      e.dataTransfer.setDragImage(dragGhost, 40, 20);
-    });
-    paletteNode.addEventListener('dragend', () => {
-      paletteDrag = false;
-      if (dragGhost) {
-        document.body.removeChild(dragGhost);
-        dragGhost = null;
+      // Request node editor state on load
+      vscode.postMessage({ command: 'requestNodeEditorState' });
+
+      function clearNodes() {
+        Array.from(editor.querySelectorAll('.node')).forEach(n => n.remove());
       }
-    });
 
-    editor.addEventListener('dragover', (e) => {
-      if (paletteDrag) {
+
+      // Context menu for node actions
+      let contextMenu = null;
+      function showContextMenu(x, y, node) {
+        console.log('showContextMenu');
+        if (contextMenu) {
+          contextMenu.remove();
+        }
+        contextMenu = document.createElement('div');
+        contextMenu.style.position = 'absolute';
+        contextMenu.style.left = x + 'px';
+        contextMenu.style.top = y + 'px';
+        contextMenu.style.background = '#23272e';
+        contextMenu.style.color = '#fff';
+        contextMenu.style.border = '1px solid #4F8EF7';
+        contextMenu.style.borderRadius = '8px';
+        contextMenu.style.boxShadow = '0 2px 8px #000a';
+        contextMenu.style.zIndex = 10000;
+        contextMenu.style.minWidth = '120px';
+        contextMenu.innerHTML = `
+          <div style="padding:10px 16px;cursor:pointer;" id="ctx-delete">Delete</div>
+          <div style="padding:10px 16px;cursor:pointer;" id="ctx-rename">Rename</div>
+          <div style="padding:10px 16px;cursor:pointer;" id="ctx-duplicate">Duplicate</div>
+        `;
+        document.body.appendChild(contextMenu);
+        // Delete
+        contextMenu.querySelector('#ctx-delete').addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          // Capture label before removing node
+          const label = node.textContent;
+          // Notify backend to delete node file and update main.py
+          vscode.postMessage({ command: 'deleteNode', label });
+          node.remove();
+          // Remove node from nodeEditorData.nodes
+          nodeEditorData.nodes = nodeEditorData.nodes.filter(n => n.label !== label);
+          // Remove connections
+          nodeEditorData.connections = nodeEditorData.connections.filter(conn => conn.from !== label && conn.to !== label);
+          saveNodeEditorData();
+          redrawConnections();
+          contextMenu.remove();
+        });
+        // Rename
+        contextMenu.querySelector('#ctx-rename').addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          // Show input for new name
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.value = node.textContent;
+          input.style.width = '90%';
+          input.style.margin = '10px';
+          input.style.borderRadius = '6px';
+          input.style.border = '1px solid #4F8EF7';
+          input.style.background = '#23272e';
+          input.style.color = '#fff';
+          input.style.fontSize = '1rem';
+          input.style.padding = '6px 10px';
+          contextMenu.innerHTML = '';
+          contextMenu.appendChild(input);
+          input.addEventListener('mousedown', (ev) => {
+            ev.stopPropagation();
+          });
+          setTimeout(() => {
+            input.focus();
+            input.select();
+          }, 0);
+          input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') {
+              const newName = input.value.trim();
+              const oldName = node.textContent;
+              if (newName && newName !== oldName) {
+                node.textContent = newName;
+                saveNodeEditorData();
+                redrawConnections();
+                // Notify backend to rename node file and references
+                vscode.postMessage({ command: 'renameNode', oldName, newName });
+              }
+              contextMenu.remove();
+            } else if (ev.key === 'Escape') {
+              contextMenu.remove();
+            }
+          });
+        });
+        // Duplicate
+        contextMenu.querySelector('#ctx-duplicate').addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          const rect = node.getBoundingClientRect();
+          const editorRect = editor.getBoundingClientRect();
+          createNode(rect.left - editorRect.left + 30, rect.top - editorRect.top + 30, node.textContent + ' Copy');
+          contextMenu.remove();
+        });
+        // Remove menu on click elsewhere
+        setTimeout(() => {
+          // document.addEventListener('mousedown', contextMenu.remove(), { once: true });
+          // document.addEventListener('mousedown', hideContextMenu, { once: true });
+        }, 0);
+      }
+      function hideContextMenu(e) {
+        if (contextMenu) {
+          contextMenu.remove();
+          contextMenu = null;
+        }
+      }
+
+      function createNode(x, y, label = null, skipBackend = false) {
+        const nodeLabel = label || ('node ' + (++nodeId));
+        const node = document.createElement('div');
+        node.className = 'node';
+        node.textContent = nodeLabel;
+        node.style.left = x + 'px';
+        node.style.top = y + 'px';
+        node.draggable = false;
+        // Add connection handle
+        const handle = document.createElement('div');
+        handle.style.position = 'absolute';
+        handle.style.right = '-10px';
+        handle.style.top = '50%';
+        handle.style.transform = 'translateY(-50%)';
+        handle.style.width = '16px';
+        handle.style.height = '16px';
+        handle.style.background = '#4F8EF7';
+        handle.style.borderRadius = '50%';
+        handle.style.cursor = 'crosshair';
+        handle.style.zIndex = '20';
+        node.appendChild(handle);
+        handle.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          connecting = true;
+          connectSource = node;
+          // Create SVG line for preview
+          const svg = document.getElementById('connections');
+          connectLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          connectLine.setAttribute('stroke', '#F7C14F');
+          connectLine.setAttribute('stroke-width', '3');
+          svg.appendChild(connectLine);
+        });
+        node.addEventListener('dblclick', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          vscode.postMessage({ command: 'openNodeFile', label: nodeLabel });
+        });
+        node.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        });
+        node.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          // Right-click: show context menu
+          // if (contextMenu) {
+          //   console.log(contextMenu.contains(e.target));
+          // }
+          console.log('node contextMenu:', contextMenu);
+          if (contextMenu && !contextMenu.contains(e.target)) {
+            console.log('Context menu already open, hiding it');
+            hideContextMenu(e);
+          }
+          if (e.button === 2) {
+            e.preventDefault();
+            showContextMenu(e.clientX, e.clientY, node);
+            return;
+          }
+          draggingNode = node;
+          console.log(node.offsetWidth)
+          offsetX = e.offsetX;
+          offsetY = e.offsetY + 10;
+          node.classList.add('dragging');
+        });
+        node.addEventListener('mouseup', (e) => {
+          if (connecting && connectSource && connectSource !== node) {
+            // Add connection
+            nodeEditorData.connections.push({ from: connectSource.textContent, to: node.textContent });
+            saveNodeEditorData();
+            redrawConnections();
+            // Notify backend to add edge in main.py
+            vscode.postMessage({ command: 'addEdge', from: connectSource.textContent.replace(/\s+/g, '_'), to: node.textContent.replace(/\s+/g, '_') });
+          }
+          connecting = false;
+          connectSource = null;
+          if (connectLine) {
+            connectLine.remove();
+            connectLine = null;
+          }
+        });
+        editor.appendChild(node);
+        if (!skipBackend) {
+          // Send addNode message to extension backend
+          vscode.postMessage({ command: 'addNode', label: nodeLabel });
+          saveNodeEditorData();
+        }
+        redrawConnections();
+      }
+      // Prevent default context menu on nodes
+      editor.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-      }
-    });
-    editor.addEventListener('drop', (e) => {
-      if (paletteDrag) {
+        e.stopPropagation();
+        if (e.target.classList.contains('node')) {
+          e.preventDefault();
+        }
+      });
+
+      editor.addEventListener('mousedown', (e) => {
         e.preventDefault();
-        const rect = editor.getBoundingClientRect();
-        createNode(e.clientX - rect.left, e.clientY - rect.top, 'Sample Node');
-      }
-    });
+        e.stopPropagation();
+        // Hide context menu if clicking outside
+        if (e.target.classList.contains('node')) {
+          e.preventDefault();
+          return;
+        }
+        console.log('editor contextMenu:', contextMenu);
+        if (contextMenu) {
+          console.log('editor contextMenu.contains(e.target):', contextMenu.contains(e.target));
+        }
+        if (contextMenu && !contextMenu.contains(e.target)) {
+          // console.log('hiding context menu from editor');
+          hideContextMenu(e);
+        }
+      });
 
-    addNodeBtn.addEventListener('click', () => {
-      createNode(100 + Math.random() * 300, 100 + Math.random() * 200);
-    });
 
-    document.addEventListener('mousemove', (e) => {
-      if (draggingNode) {
-        draggingNode.style.left = (e.clientX - offsetX) + 'px';
-        draggingNode.style.top = (e.clientY - offsetY) + 'px';
-      }
-    });
-    document.addEventListener('mouseup', () => {
-      if (draggingNode) {
-        draggingNode.classList.remove('dragging');
-        draggingNode = null;
-      }
-    });
-  </script>
+
+      // Click-to-add node: listen for click in editor
+      let pendingNodeType = null;
+      window.addEventListener('message', event => {
+        const message = event.data;
+        if (message.command === 'setPendingNodeType') {
+          pendingNodeType = message.label;
+          editor.style.cursor = 'copy';
+        }
+        // ...existing code for other message handlers...
+        if (message.command === 'showStateInfo') {
+          // ...existing code...
+        } else if (message.command === 'loadNodes' && Array.isArray(message.nodes)) {
+          // ...existing code...
+        } else if (message.command === 'loadNodeEditorState' && message.nodeEditorState) {
+          // ...existing code...
+        } else if (message.command === 'createNodeFromSidebar') {
+          // ...existing code...
+        }
+      });
+
+      editor.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (pendingNodeType) {
+          const rect = editor.getBoundingClientRect();
+          vscode.postMessage({
+            command: 'editorClickToAddNode',
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+            label: pendingNodeType
+          });
+          pendingNodeType = null;
+          editor.style.cursor = '';
+        }
+      });
+
+      addNodeBtn.addEventListener('click', () => {
+        const nodeLabel = nodeLabelInput.value || 'Untitled Node';
+        createNode(100 + Math.random() * 300, 100 + Math.random() * 200, nodeLabel);
+      });
+
+
+      document.addEventListener('mousemove', (e) => {
+        if (draggingNode) {
+          draggingNode.style.left = (e.clientX - offsetX) + 'px';
+          draggingNode.style.top = (e.clientY - offsetY) + 'px';
+          redrawConnections();
+        }
+        if (connecting && connectSource && connectLine) {
+          const fromRect = connectSource.getBoundingClientRect();
+          const editorRect = editor.getBoundingClientRect();
+          const x1 = fromRect.right - editorRect.left;
+          const y1 = fromRect.top + fromRect.height / 2 - editorRect.top;
+          connectLine.setAttribute('x1', x1);
+          connectLine.setAttribute('y1', y1);
+          connectLine.setAttribute('x2', e.clientX - editorRect.left);
+          connectLine.setAttribute('y2', e.clientY - editorRect.top);
+        }
+      });
+      document.addEventListener('mouseup', () => {
+        if (draggingNode) {
+          draggingNode.classList.remove('dragging');
+          draggingNode = null;
+          saveNodeEditorData();
+          redrawConnections();
+        }
+        if (connecting) {
+          connecting = false;
+          connectSource = null;
+          if (connectLine) {
+            connectLine.remove();
+            connectLine = null;
+          }
+        }
+      });
+
+      // Save node editor data when tab is hidden or window is closed
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          saveNodeEditorData();
+        }
+      });
+      window.addEventListener('beforeunload', () => {
+        saveNodeEditorData();
+      });
+    </script>
 </body>
 </html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Node Builder Sidebar</title>
+  <style>
+    body { background: #23272e; color: #fff; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; height: 100vh; }
+    .sidebar-btn {
+      margin-top: 32px;
+      background: #4F8EF7;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 10px 24px;
+      font-size: 1rem;
+      cursor: pointer;
+      box-shadow: 0 2px 8px #0004;
+    }
+  </style>
+</head>
+<body>
+  <!-- <div class="palette-node" id="sample-palette-node" style="width:80px;height:40px;background:#4F8EF7;color:#fff;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-top:32px;margin-bottom:16px;font-size:1rem;user-select:none;border:2px solid #fff2;">Sample Node</div>
+  <button id="new-project-btn" class="sidebar-btn">Create New Project</button>
+  <div id="state-table-container" style="width:100%;margin-top:32px;"></div> -->
+  <div style="width: 100%;">
+    <div class="sidebar-section">
+    <div class="sidebar-section-header" style="cursor:pointer;padding:10px 16px;background:#23272e;border-bottom:1px solid #333;font-weight:bold;">Premade Nodes ▼</div>
+    <div class="sidebar-section-content" style="padding:10px 0 0 0;">
+      <div class="palette-node" id="sample-palette-node" style="width:80px;height:40px;background:#4F8EF7;color:#fff;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:16px;font-size:1rem;user-select:none;border:2px solid #fff2;">Sample Node</div>
+        <!-- Add more premade nodes here -->
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" style="cursor:pointer;padding:10px 16px;background:#23272e;border-bottom:1px solid #333;font-weight:bold;">Sample Section ▼</div>
+      <div class="sidebar-section-content" style="padding:10px 0 0 0;">
+        <div style="color:#aaa;padding:8px 16px;">This is a sample section. Add your content here.</div>
+      </div>
+    </div>
+    <button id="new-project-btn" class="sidebar-btn">Create New Project</button>
+    <!-- <div id="state-table-container" style="width:100%;margin-top:32px;"></div> -->
+  </div>
+  <script>
+    const vscode = acquireVsCodeApi();
+    const newProjectBtn = document.getElementById("new-project-btn");
+    // Check if project exists (main.py and /nodes)
+    window.addEventListener('message', event => {
+      const message = event.data;
+      if (message.command === 'projectDetected') {
+        newProjectBtn.textContent = 'Load Workspace Project';
+      }
+    });
+    vscode.postMessage({ command: 'checkProjectExists' });
+    newProjectBtn.addEventListener("click", () => {
+      vscode.postMessage({ command: "createNewProject" });
+    });
+    vscode.postMessage({ command: "getStateInfo" });
+    window.addEventListener("message", event => {
+      const message = event.data;
+      if (message.command === "showStateInfo") {
+        const container = document.getElementById("state-table-container");
+        if (message.stateInfo && Array.isArray(message.stateInfo)) {
+          let html = `<b>State class variables</b><br><div style='overflow-x:auto;'><table style='width:100%;margin-top:8px;background:#23272e;border-radius:8px;box-shadow:0 2px 8px #0004;border-collapse:separate;border-spacing:0;'><thead><tr><th style='color:#4F8EF7;text-align:left;padding:6px 12px;'>Variable</th><th style='color:#4F8EF7;text-align:left;padding:6px 12px;'>Value/Type</th></tr></thead><tbody>`;
+          for (let i = 0; i < message.stateInfo.length; ++i) {
+            const row = message.stateInfo[i];
+            html += `<tr><td style='padding:6px 12px;'><input data-row='${i}' data-col='0' value='${String(row[0]).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")}' style='width:98%;background:#23272e;color:#fff;border:none;border-bottom:1px solid #4F8EF7;padding:4px;'></td><td style='padding:6px 12px;'><input data-row='${i}' data-col='1' value='${String(row[1]).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")}' style='width:98%;background:#23272e;color:#fff;border:none;border-bottom:1px solid #4F8EF7;padding:4px;'></td></tr>`;
+          }
+          html += `</tbody></table></div><button id='save-state-btn' style='margin-top:16px;background:#4F8EF7;color:#fff;border:none;border-radius:6px;padding:8px 24px;cursor:pointer;'>Save Changes</button>`;
+          container.innerHTML = html;
+          document.getElementById("save-state-btn").onclick = () => {
+            const rows = [];
+            for (let i = 0; i < message.stateInfo.length; ++i) {
+              const varName = container.querySelector(`input[data-row='${i}'][data-col='0']`).value;
+              const varValue = container.querySelector(`input[data-row='${i}'][data-col='1']`).value;
+              rows.push([varName, varValue]);
+            }
+            vscode.postMessage({ command: "updateStateInfo", stateInfo: rows });
+          };
+        } else {
+          container.innerHTML = `<b>No State class found in main.py</b>`;
+        }
+      }
+    });
+    // Palette node click-to-add for cross-webview
+    const paletteNode = document.getElementById('sample-palette-node');
+    paletteNode.addEventListener('click', () => {
+      vscode.postMessage({ command: 'sidebarPaletteNodeClick', label: 'Sample Node' });
+    });
+
+    Array.from(document.getElementsByClassName('sidebar-section-header')).forEach(header => {
+    header.addEventListener('click', () => {
+      const content = header.nextElementSibling;
+      if (content.style.display === 'none') {
+        content.style.display = '';
+        header.textContent = header.textContent.replace('▶', '▼');
+      } else {
+        content.style.display = 'none';
+        header.textContent = header.textContent.replace('▼', '▶');
+      }
+    });
+  });
+  </script>
+</body>
+</html>
