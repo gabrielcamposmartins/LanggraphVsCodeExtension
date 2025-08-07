@@ -209,7 +209,7 @@
           }
         } else if (message.command === 'createNodeFromSidebar') {
           // Create a node at the given position with the given label
-          createNode(message.x, message.y, message.label);
+          createNode(message.x, message.y, message.label, false, message.userNodeContent);
         }
       });
 
@@ -323,7 +323,7 @@
         }
       }
 
-      function createNode(x, y, label = null, skipBackend = false) {
+      function createNode(x, y, label = null, skipBackend = false, userNodeContent = null) {
         const nodeLabel = label || ('node ' + (++nodeId));
         const node = document.createElement('div');
         node.className = 'node';
@@ -406,7 +406,12 @@
         editor.appendChild(node);
         if (!skipBackend) {
           // Send addNode message to extension backend
-          vscode.postMessage({ command: 'addNode', label: nodeLabel });
+          const addNodeMessage = { command: 'addNode', label: nodeLabel };
+          if (userNodeContent) {
+            addNodeMessage.isUserNode = true;
+            addNodeMessage.userNodeContent = userNodeContent;
+          }
+          vscode.postMessage(addNodeMessage);
           saveNodeEditorData();
         }
         redrawConnections();
@@ -442,10 +447,14 @@
 
       // Click-to-add node: listen for click in editor
       let pendingNodeType = null;
+      let pendingNodeUserContent = null;
+      let pendingNodeIsUser = false;
       window.addEventListener('message', event => {
         const message = event.data;
         if (message.command === 'setPendingNodeType') {
           pendingNodeType = message.label;
+          pendingNodeUserContent = message.userNodeContent || null;
+          pendingNodeIsUser = message.isUserNode || false;
           editor.style.cursor = 'copy';
         }
         // ...existing code for other message handlers...
@@ -465,13 +474,20 @@
         e.stopPropagation();
         if (pendingNodeType) {
           const rect = editor.getBoundingClientRect();
-          vscode.postMessage({
+          const postMessage = {
             command: 'editorClickToAddNode',
             x: e.clientX - rect.left,
             y: e.clientY - rect.top,
             label: pendingNodeType
-          });
+          };
+          if (pendingNodeIsUser && pendingNodeUserContent) {
+            postMessage.isUserNode = true;
+            postMessage.userNodeContent = pendingNodeUserContent;
+          }
+          vscode.postMessage(postMessage);
           pendingNodeType = null;
+          pendingNodeUserContent = null;
+          pendingNodeIsUser = false;
           editor.style.cursor = '';
         }
       });
